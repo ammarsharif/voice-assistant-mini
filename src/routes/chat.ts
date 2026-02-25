@@ -12,9 +12,13 @@ export const chatRouter = Router();
 
 const ChatBodySchema = z.object({
     tenantId: z.string().uuid('tenantId must be a valid UUID'),
-    message: z.string().min(1, 'message cannot be empty').max(2000, 'message too long'),
+    message: z.string().min(1).max(2000).optional(),
+    audioInput: z.string().min(1).max(2000).optional(),
     sessionId: z.string().uuid('sessionId must be a valid UUID').optional(),
     stream: z.boolean().optional().default(false),
+}).refine((d) => d.message || d.audioInput, {
+    message: 'Either "message" or "audioInput" must be provided',
+    path: ['message'],
 });
 
 type ChatBody = z.infer<typeof ChatBodySchema>;
@@ -24,12 +28,13 @@ chatRouter.post(
     validate(ChatBodySchema),
     asyncHandler(withTenant),
     asyncHandler(async (req, res) => {
-        const { tenantId, message, sessionId: providedSessionId, stream } = req.body as ChatBody;
+        const { tenantId, message, audioInput, sessionId: providedSessionId, stream } = req.body as ChatBody;
         const sessionId = providedSessionId ?? randomUUID();
 
         logger.info(
             'POST /chat',
-            `tenant=${req.tenant!.name} | session=${sessionId} | stream=${stream} | msg="${message.slice(0, 80)}…"`
+            `tenant=${req.tenant!.name} | session=${sessionId} | stream=${stream} | ` +
+            (audioInput ? `audio="${audioInput.slice(0, 60)}…"` : `msg="${message!.slice(0, 80)}…"`)
         );
 
         if (stream) {
@@ -42,13 +47,19 @@ chatRouter.post(
                 res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
             };
 
-            const jobPromise = submitJob(tenantId, sessionId, message);
+            const jobPromise = submitJob(tenantId, sessionId, message ?? audioInput!, audioInput);
 
             const { agentEvents } = await import('../events/eventBus');
 
             const onChunk = (e: { sessionId: string; chunk: string; index: number }) => {
                 if (e.sessionId === sessionId) {
                     sendEvent('chunk', { chunk: e.chunk, index: e.index });
+                }
+            };
+
+            const onAudioChunk = (e: { sessionId: string; index: number; audio: string; text: string; durationMs: number }) => {
+                if (e.sessionId === sessionId) {
+                    sendEvent('audio_chunk', { index: e.index, audio: e.audio, text: e.text, durationMs: e.durationMs });
                 }
             };
 
@@ -70,16 +81,26 @@ chatRouter.post(
                 }
             };
 
+            const onSttDone = (e: { sessionId: string; transcript: string; confidence: number; processingMs: number }) => {
+                if (e.sessionId === sessionId) {
+                    sendEvent('stt_done', { transcript: e.transcript, confidence: e.confidence, processingMs: e.processingMs });
+                }
+            };
+
             agentEvents.on('agent.chunk', onChunk);
+            agentEvents.on('agent.audioChunk', onAudioChunk);
             agentEvents.on('agent.tool.start', onToolStart);
             agentEvents.on('agent.tool.done', onToolDone);
             agentEvents.on('agent.interrupted', onInterrupted);
+            agentEvents.on('agent.stt.done', onSttDone);
 
             const cleanup = () => {
                 agentEvents.off('agent.chunk', onChunk);
+                agentEvents.off('agent.audioChunk', onAudioChunk);
                 agentEvents.off('agent.tool.start', onToolStart);
                 agentEvents.off('agent.tool.done', onToolDone);
                 agentEvents.off('agent.interrupted', onInterrupted);
+                agentEvents.off('agent.stt.done', onSttDone);
             };
 
             req.on('close', () => {
@@ -98,6 +119,8 @@ chatRouter.post(
                     jobId: result.jobId,
                     durationMs: result.durationMs,
                     interrupted: result.interrupted,
+                    audioChunks: result.audioChunks,
+                    ...(result.transcript !== undefined && { transcript: result.transcript }),
                     ...(result.toolUsed && { toolUsed: result.toolUsed }),
                 });
                 res.end();
@@ -110,7 +133,7 @@ chatRouter.post(
             return;
         }
 
-        const result = await submitJob(tenantId, sessionId, message);
+        const result = await submitJob(tenantId, sessionId, message ?? audioInput!, audioInput);
 
         res.json({
             response: result.response,
@@ -119,6 +142,8 @@ chatRouter.post(
             jobId: result.jobId,
             durationMs: result.durationMs,
             interrupted: result.interrupted,
+            audioChunks: result.audioChunks,
+            ...(result.transcript !== undefined && { transcript: result.transcript }),
             ...(result.toolUsed && { toolUsed: result.toolUsed }),
         });
     })

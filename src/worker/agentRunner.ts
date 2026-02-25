@@ -7,6 +7,7 @@ export interface AgentJob {
     tenantId: string;
     sessionId: string;
     message: string;
+    audioInput?: string;
 }
 
 export interface AgentJobResult {
@@ -20,6 +21,8 @@ export interface AgentJobResult {
     interrupted: boolean;
     status: 'completed' | 'failed';
     error?: string;
+    transcript?: string;
+    audioChunks: number;
 }
 
 const activeProcesses = new Map<string, AgentProcess>();
@@ -37,7 +40,8 @@ export async function runAgentJob(job: AgentJob): Promise<AgentJobResult> {
     const process = new AgentProcess({
         tenantId: job.tenantId,
         sessionId: job.sessionId,
-        message: job.message,
+        message: job.audioInput ? undefined : job.message,
+        audioInput: job.audioInput,
     });
 
     const existing = activeProcesses.get(job.sessionId);
@@ -77,11 +81,14 @@ export async function runAgentJob(job: AgentJob): Promise<AgentJobResult> {
             durationMs: output.durationMs,
             interrupted: output.interrupted,
             status: 'completed',
+            transcript: output.transcript,
+            audioChunks: output.audioChunks,
         };
 
         logger.worker(
             'AgentRunner',
             `Job complete [${job.jobId}] in ${output.durationMs}ms | situation=${output.situation}` +
+            ` | audioChunks=${output.audioChunks}` +
             (output.toolUsed ? ` | tool: ${output.toolUsed}` : '') +
             (output.interrupted ? ' | INTERRUPTED' : '')
         );
@@ -108,6 +115,7 @@ export async function runAgentJob(job: AgentJob): Promise<AgentJobResult> {
             interrupted: false,
             status: 'failed',
             error: errorMsg,
+            audioChunks: 0,
         };
 
         agentEvents.emit('agent:job:failed', result);

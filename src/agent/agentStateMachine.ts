@@ -8,7 +8,8 @@ export type AgentState =
     | 'STREAMING'
     | 'WAITING_FOR_TOOL'
     | 'INTERRUPTED'
-    | 'COMPLETED';
+    | 'COMPLETED'
+    | 'SPEAKING';
 
 const TRANSITIONS: Record<AgentState, AgentState[]> = {
     IDLE: ['LISTENING'],
@@ -17,7 +18,8 @@ const TRANSITIONS: Record<AgentState, AgentState[]> = {
     STREAMING: ['WAITING_FOR_TOOL', 'COMPLETED', 'INTERRUPTED'],
     WAITING_FOR_TOOL: ['STREAMING', 'INTERRUPTED'],
     INTERRUPTED: ['LISTENING', 'IDLE'],
-    COMPLETED: ['IDLE', 'LISTENING'],
+    COMPLETED: ['IDLE', 'LISTENING', 'SPEAKING'],
+    SPEAKING: ['IDLE', 'INTERRUPTED'],
 };
 
 export class AgentStateMachine extends EventEmitter {
@@ -35,6 +37,8 @@ export class AgentStateMachine extends EventEmitter {
     }
 
     setState(next: AgentState): void {
+        if (this._state === next) return;
+
         const allowed = TRANSITIONS[this._state];
         if (!allowed.includes(next)) {
             throw new Error(

@@ -35,7 +35,12 @@ async function executeJob(job: AgentJob): Promise<AgentJobResult> {
     }
 }
 
-export async function submitJob(tenantId: string, sessionId: string, message: string): Promise<AgentJobResult> {
+export async function submitJob(
+    tenantId: string,
+    sessionId: string,
+    message: string,
+    audioInput?: string
+): Promise<AgentJobResult> {
     const rl = await checkRateLimit(tenantId);
     if (!rl.allowed) {
         throw Object.assign(
@@ -49,6 +54,7 @@ export async function submitJob(tenantId: string, sessionId: string, message: st
         tenantId,
         sessionId,
         message,
+        audioInput,
     };
 
     logger.worker('Worker', `Job submitted [${job.jobId}] tenant=${tenantId} | session=${sessionId}`);

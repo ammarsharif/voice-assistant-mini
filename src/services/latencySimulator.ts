@@ -7,6 +7,21 @@ export class LatencySimulator {
         this.enabled = enabled;
     }
 
+    async sttDelay(minMs = 30, maxMs = 120): Promise<void> {
+        if (!this.enabled) return;
+        const delay = this.jitter(minMs, maxMs);
+        logger.debug('LatencySimulator', `STT delay: ${delay}ms`);
+        await this.sleep(delay);
+    }
+
+    async ttsDelay(charCount = 20): Promise<void> {
+        if (!this.enabled) return;
+        const base = Math.min(60, Math.max(10, Math.ceil(charCount * 0.8)));
+        const delay = this.jitter(Math.max(10, base - 10), base + 10);
+        logger.debug('LatencySimulator', `TTS delay: ${delay}ms (chars=${charCount})`);
+        await this.sleep(delay);
+    }
+
     async tokenDelay(minMs = 10, maxMs = 25): Promise<void> {
         if (!this.enabled) return;
         const delay = this.jitter(minMs, maxMs);

@@ -8,11 +8,14 @@ import { buildRuntimeContext } from '../services/runtimeContextService';
 import { getOrCreateSession, saveSession } from '../services/sessionService';
 import { withSessionLock } from '../services/sessionLockService';
 import { saveConversation } from '../services/conversationService';
+import { mockSTT } from './sttTts/mockSTT';
+import { mockTTSStream } from './sttTts/mockTTS';
 
 export interface AgentProcessInput {
     tenantId: string;
     sessionId: string;
-    message: string;
+    message?: string;
+    audioInput?: string;
 }
 
 export interface AgentProcessOutput {
@@ -23,6 +26,8 @@ export interface AgentProcessOutput {
     interrupted: boolean;
     apiCalls: number;
     durationMs: number;
+    transcript?: string;
+    audioChunks: number;
 }
 
 export class AgentProcess {
@@ -46,6 +51,7 @@ export class AgentProcess {
         this.channel.on('agent.tool.done', (e) => agentEvents.emit('agent.tool.done', e));
         this.channel.on('agent.interrupted', (e) => agentEvents.emit('agent.interrupted', e));
         this.channel.on('agent.error', (e) => agentEvents.emit('agent.error', e));
+        this.channel.on('agent.audioChunk', (e) => agentEvents.emit('agent.audioChunk', e));
     }
 
     get messageChannel(): MessageChannel {
@@ -57,7 +63,7 @@ export class AgentProcess {
     }
 
     async start(): Promise<AgentProcessOutput> {
-        const { tenantId, sessionId, message } = this.input;
+        const { tenantId, sessionId, message: rawMessage, audioInput } = this.input;
         const start = Date.now();
 
         this.stateMachine.setState('LISTENING');
@@ -76,9 +82,37 @@ export class AgentProcess {
                 logger.info('AgentProcess', `New session — id=${sessionId} | tenant=${tenantId}`);
             }
 
+            let transcript: string | undefined;
+            let userMessage: string;
+
+            if (audioInput) {
+                logger.info('AgentProcess', `STT start — session=${sessionId} | audio="${audioInput.slice(0, 50)}…"`);
+
+                const sttResult = await mockSTT(audioInput, sessionId);
+                transcript = sttResult.transcript;
+                userMessage = sttResult.transcript || audioInput;
+
+                agentEvents.emit('agent.stt.done', {
+                    sessionId,
+                    tenantId,
+                    transcript: sttResult.transcript,
+                    confidence: sttResult.confidence,
+                    processingMs: sttResult.processingMs,
+                });
+
+                logger.info(
+                    'AgentProcess',
+                    `STT done — session=${sessionId} | transcript="${sttResult.transcript}" | conf=${sttResult.confidence.toFixed(2)}`
+                );
+            } else if (rawMessage) {
+                userMessage = rawMessage;
+            } else {
+                throw new Error('AgentProcess: either message or audioInput must be provided');
+            }
+
             this.stateMachine.setState('PROCESSING');
 
-            const runtimeCtx = await buildRuntimeContext(tenantId, message, session);
+            const runtimeCtx = await buildRuntimeContext(tenantId, userMessage, session);
 
             const streamingAgent = new StreamingAgent({
                 sessionId,
@@ -100,7 +134,35 @@ export class AgentProcess {
                 this.stateMachine.setState('COMPLETED');
             }
 
-            session.history.push({ role: 'user', content: message });
+            let audioChunkCount = 0;
+
+            if (!result.interrupted && result.response) {
+                logger.info('AgentProcess', `TTS start — session=${sessionId}`);
+                this.stateMachine.setState('SPEAKING');
+
+                for await (const chunk of mockTTSStream(result.response, sessionId, this.interruptSvc)) {
+                    this.channel.emitAudioChunk(
+                        chunk.index,
+                        chunk.audio,
+                        chunk.text,
+                        chunk.durationMs
+                    );
+                    audioChunkCount++;
+
+                    if (this.interruptSvc.isInterrupted(sessionId)) {
+                        logger.warn('AgentProcess', `TTS halted by barge-in — session=${sessionId} | chunk=${chunk.index}`);
+                        this.channel.emitInterrupt('barge-in during TTS');
+                        break;
+                    }
+                }
+
+                logger.info(
+                    'AgentProcess',
+                    `TTS done — session=${sessionId} | chunks=${audioChunkCount} | interrupted=${this.interruptSvc.isInterrupted(sessionId)}`
+                );
+            }
+
+            session.history.push({ role: 'user', content: userMessage });
             session.history.push({ role: 'assistant', content: result.response });
             session.situation = result.situationAfterTool;
 
@@ -108,7 +170,7 @@ export class AgentProcess {
 
             await saveConversation({
                 tenantId,
-                message,
+                message: userMessage,
                 response: result.response,
                 toolUsed: result.toolUsed,
                 toolResult: undefined,
@@ -123,6 +185,7 @@ export class AgentProcess {
                 toolUsed: result.toolUsed,
                 durationMs,
                 interrupted: result.interrupted,
+                audioChunks: audioChunkCount,
             });
 
             if (result.toolUsed) {
@@ -137,7 +200,8 @@ export class AgentProcess {
             logger.info(
                 'AgentProcess',
                 `Turn complete — session=${sessionId} | ${durationMs}ms | ` +
-                `situation=${result.situationAfterTool} | interrupted=${result.interrupted}` +
+                `situation=${result.situationAfterTool} | interrupted=${result.interrupted} | ` +
+                `audioChunks=${audioChunkCount}` +
                 (result.toolUsed ? ` | tool=${result.toolUsed}` : '')
             );
 
@@ -151,6 +215,8 @@ export class AgentProcess {
                 interrupted: result.interrupted,
                 apiCalls: result.apiCalls,
                 durationMs,
+                transcript,
+                audioChunks: audioChunkCount,
             };
         });
     }

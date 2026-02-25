@@ -30,6 +30,14 @@ export interface InterruptEvent {
     reason: string;
 }
 
+export interface AudioChunkEvent {
+    sessionId: string;
+    index: number;
+    audio: string;
+    text: string;
+    durationMs: number;
+}
+
 export interface ErrorEvent {
     sessionId: string;
     error: string;
@@ -95,6 +103,18 @@ export class MessageChannel extends EventEmitter {
             wsClientManager.send(this.sessionId, {
                 type: 'tool_result',
                 payload: { sessionId: this.sessionId, name: toolName, result },
+            });
+        }
+    }
+
+    emitAudioChunk(index: number, audio: string, text: string, durationMs: number): void {
+        const event: AudioChunkEvent = { sessionId: this.sessionId, index, audio, text, durationMs };
+        this.emit('agent.audioChunk', event);
+
+        if (wsClientManager.has(this.sessionId)) {
+            wsClientManager.send(this.sessionId, {
+                type: 'audio_chunk',
+                payload: { sessionId: this.sessionId, index, audio, text, durationMs },
             });
         }
     }
