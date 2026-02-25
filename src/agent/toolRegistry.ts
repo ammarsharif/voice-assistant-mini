@@ -3,6 +3,13 @@ import { BookTourSchema, handleBookTour, bookTourDefinition } from './tools/book
 import { TakeNoteSchema, handleTakeNote, takeNoteDefinition } from './tools/takeNote';
 import { UpdateContactSchema, handleUpdateContact, updateContactDefinition } from './tools/updateContact';
 
+export interface ToolResult {
+    success: boolean;
+    output: Record<string, unknown>;
+    event?: string;
+    eventPayload?: Record<string, unknown>;
+}
+
 type ToolHandler = (tenantId: string, rawArgs: unknown) => Promise<Record<string, unknown>>;
 
 interface ToolEntry {
@@ -36,7 +43,7 @@ registerTool('update_contact_info', updateContactDefinition, async (tenantId, ra
 });
 
 export function getAllToolDefinitions(): ChatCompletionTool[] {
-    return Array.from(registry.values()).map((entry) => entry.definition);
+    return Array.from(registry.values()).map((e) => e.definition);
 }
 
 export async function executeTool(
@@ -49,4 +56,8 @@ export async function executeTool(
         throw new Error(`Tool "${toolName}" is not registered in the tool registry.`);
     }
     return entry.handler(tenantId, rawArgs);
+}
+
+export function getRegisteredToolNames(): string[] {
+    return Array.from(registry.keys());
 }

@@ -1,40 +1,35 @@
-import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import { env } from '../config/env';
-import { getTenantById } from '../services/tenantService';
-import { getCachedPrompt, cachePrompt } from '../services/redis';
+import { openaiClient, DEFAULT_CHAT_MODEL, AGENT_TEMPERATURE } from '../config/openai';
+import { getCompiledPrompt } from '../services/promptService';
 import { saveConversation } from '../services/conversationService';
 import { getAllToolDefinitions, executeTool } from './toolRegistry';
-
-const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+import { logger } from '../utils/logger';
 
 export interface AgentInput {
     tenantId: string;
     message: string;
+    sessionId?: string;
+}
+
+export interface ToolCallMeta {
+    name: string;
+    arguments: Record<string, unknown>;
+    result: Record<string, unknown>;
+    eventEmitted?: boolean;
 }
 
 export interface AgentOutput {
     response: string;
     toolUsed?: string;
+    toolMeta?: ToolCallMeta;
+    model: string;
+    apiCalls: number;
 }
 
 export async function run(input: AgentInput): Promise<AgentOutput> {
     const { tenantId, message } = input;
-    let systemPrompt = await getCachedPrompt(tenantId);
 
-    if (!systemPrompt) {
-        const tenant = await getTenantById(tenantId);
-        if (!tenant) {
-            throw new Error(`Tenant "${tenantId}" not found`);
-        }
-
-        systemPrompt = `${tenant.system_prompt}\n\nToday's date: ${new Date().toISOString().split('T')[0]}`;
-
-        await cachePrompt(tenantId, systemPrompt);
-        console.log(`🔵 [Agent] Cache miss — prompt compiled and cached for tenant: ${tenantId}`);
-    } else {
-        console.log(`🟢 [Agent] Cache hit — using cached prompt for tenant: ${tenantId}`);
-    }
+    const systemPrompt = await getCompiledPrompt(tenantId);
 
     const messages: ChatCompletionMessageParam[] = [
         { role: 'system', content: systemPrompt },
@@ -42,32 +37,35 @@ export async function run(input: AgentInput): Promise<AgentOutput> {
     ];
     const tools = getAllToolDefinitions();
 
-    const firstResponse = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+    logger.debug('Agent', `First completion | model=${DEFAULT_CHAT_MODEL}`);
+
+    const firstResponse = await openaiClient.chat.completions.create({
+        model: DEFAULT_CHAT_MODEL,
         messages,
         tools,
         tool_choice: 'auto',
-        temperature: 0.3,
+        temperature: AGENT_TEMPERATURE,
     });
 
     const firstChoice = firstResponse.choices[0];
     let finalResponse: string;
-    let toolUsed: string | undefined;
+    let toolMeta: ToolCallMeta | undefined;
+    let apiCalls = 1;
 
     if (firstChoice.message.tool_calls && firstChoice.message.tool_calls.length > 0) {
         const toolCall = firstChoice.message.tool_calls[0];
-        toolUsed = toolCall.function.name;
+        const toolName = toolCall.function.name;
 
-        console.log(`🔧 [Agent] Tool called: ${toolUsed}`);
+        logger.debug('Agent', `Tool requested: ${toolName}`);
 
-        const rawArgs: unknown = JSON.parse(toolCall.function.arguments);
+        const rawArgs = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
+        const toolResult = await executeTool(toolName, tenantId, rawArgs);
 
-        const toolResult = await executeTool(toolUsed, tenantId, rawArgs);
+        logger.debug('Agent', `Tool result:`, toolResult);
 
-        console.log(`✅ [Agent] Tool result:`, toolResult);
-
-        const secondResponse = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
+        const secondResponse = await openaiClient.chat.completions.create({
+            model: DEFAULT_CHAT_MODEL,
+            temperature: AGENT_TEMPERATURE,
             messages: [
                 ...messages,
                 firstChoice.message,
@@ -77,20 +75,33 @@ export async function run(input: AgentInput): Promise<AgentOutput> {
                     content: JSON.stringify(toolResult),
                 },
             ],
-            temperature: 0.3,
         });
 
         finalResponse = secondResponse.choices[0].message.content ?? 'Done.';
+        apiCalls = 2;
+
+        toolMeta = {
+            name: toolName,
+            arguments: rawArgs,
+            result: toolResult,
+        };
     } else {
-        finalResponse = firstChoice.message.content ?? 'I\'m not sure how to help with that.';
+        finalResponse = firstChoice.message.content ?? "I'm not sure how to help with that.";
     }
 
     await saveConversation({
         tenantId,
         message,
         response: finalResponse,
-        toolUsed,
+        toolUsed: toolMeta?.name,
+        toolResult: toolMeta?.result,
     });
 
-    return { response: finalResponse, toolUsed };
+    return {
+        response: finalResponse,
+        toolUsed: toolMeta?.name,
+        toolMeta,
+        model: DEFAULT_CHAT_MODEL,
+        apiCalls,
+    };
 }
