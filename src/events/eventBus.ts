@@ -54,3 +54,30 @@ export interface JobFailedEvent {
     status: 'failed';
     error: string;
 }
+
+export interface SituationSwitchedEvent {
+    sessionId: string;
+    tenantId: string;
+    previousSituation: string;
+    newSituation: string;
+}
+
+export interface SessionStartedEvent {
+    sessionId: string;
+    tenantId: string;
+    situation: string;
+}
+
+export interface SessionEndedEvent {
+    sessionId: string;
+    tenantId: string;
+    turnCount: number;
+}
+
+export interface MessageProcessedEvent {
+    sessionId: string;
+    tenantId: string;
+    situation: string;
+    toolUsed?: string;
+    durationMs: number;
+}

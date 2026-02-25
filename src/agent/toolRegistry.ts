@@ -2,6 +2,7 @@ import type { ChatCompletionTool } from 'openai/resources/chat/completions';
 import { BookTourSchema, handleBookTour, bookTourDefinition } from './tools/bookTour';
 import { TakeNoteSchema, handleTakeNote, takeNoteDefinition } from './tools/takeNote';
 import { UpdateContactSchema, handleUpdateContact, updateContactDefinition } from './tools/updateContact';
+import { switchSituationDefinition } from './tools/switchSituation';
 
 export interface ToolResult {
     success: boolean;
@@ -40,6 +41,10 @@ registerTool('take_note', takeNoteDefinition, async (tenantId, rawArgs) => {
 registerTool('update_contact_info', updateContactDefinition, async (tenantId, rawArgs) => {
     const args = UpdateContactSchema.parse(rawArgs);
     return handleUpdateContact(tenantId, args);
+});
+
+registerTool('switch_situation', switchSituationDefinition, async (_tenantId, _rawArgs) => {
+    return { success: false, message: 'switch_situation must be handled by the lifecycle manager.' };
 });
 
 export function getAllToolDefinitions(): ChatCompletionTool[] {

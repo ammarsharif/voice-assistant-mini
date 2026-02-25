@@ -33,7 +33,7 @@ async function executeJob(job: AgentJob): Promise<AgentJobResult> {
     }
 }
 
-export async function submitJob(tenantId: string, message: string): Promise<AgentJobResult> {
+export async function submitJob(tenantId: string, sessionId: string, message: string): Promise<AgentJobResult> {
     const rl = await checkRateLimit(tenantId);
     if (!rl.allowed) {
         throw Object.assign(
@@ -45,10 +45,11 @@ export async function submitJob(tenantId: string, message: string): Promise<Agen
     const job: AgentJob = {
         jobId: randomUUID(),
         tenantId,
+        sessionId,
         message,
     };
 
-    logger.worker('Worker', `Job submitted [${job.jobId}] tenant=${tenantId}`);
+    logger.worker('Worker', `Job submitted [${job.jobId}] tenant=${tenantId} | session=${sessionId}`);
     agentEvents.emit('worker:job:submitted', { jobId: job.jobId, tenantId, message });
 
     if (activeJobs < MAX_CONCURRENT_JOBS) {

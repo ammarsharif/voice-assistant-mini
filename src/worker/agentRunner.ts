@@ -1,18 +1,20 @@
-import { run as runAgent, AgentOutput } from '../agent/agent';
+import { handleMessage } from '../agent/lifecycle';
 import { agentEvents } from '../events/eventBus';
 import { logger } from '../utils/logger';
 
 export interface AgentJob {
     jobId: string;
     tenantId: string;
+    sessionId: string;
     message: string;
-    sessionId?: string;
 }
 
 export interface AgentJobResult {
     jobId: string;
     tenantId: string;
+    sessionId: string;
     response: string;
+    situation: string;
     toolUsed?: string;
     durationMs: number;
     status: 'completed' | 'failed';
@@ -20,9 +22,7 @@ export interface AgentJobResult {
 }
 
 export async function runAgentJob(job: AgentJob): Promise<AgentJobResult> {
-    const start = Date.now();
-
-    logger.worker('AgentRunner', `Job started  [${job.jobId}] tenant=${job.tenantId}`);
+    logger.worker('AgentRunner', `Job started  [${job.jobId}] tenant=${job.tenantId} | session=${job.sessionId}`);
 
     agentEvents.emit('agent:job:started', {
         jobId: job.jobId,
@@ -32,25 +32,26 @@ export async function runAgentJob(job: AgentJob): Promise<AgentJobResult> {
     });
 
     try {
-        const output: AgentOutput = await runAgent({
+        const output = await handleMessage({
             tenantId: job.tenantId,
+            sessionId: job.sessionId,
             message: job.message,
         });
-
-        const durationMs = Date.now() - start;
 
         const result: AgentJobResult = {
             jobId: job.jobId,
             tenantId: job.tenantId,
+            sessionId: job.sessionId,
             response: output.response,
+            situation: output.situation,
             toolUsed: output.toolUsed,
-            durationMs,
+            durationMs: output.durationMs,
             status: 'completed',
         };
 
         logger.worker(
             'AgentRunner',
-            `Job complete [${job.jobId}] in ${durationMs}ms` +
+            `Job complete [${job.jobId}] in ${output.durationMs}ms | situation=${output.situation}` +
             (output.toolUsed ? ` | tool: ${output.toolUsed}` : '')
         );
 
@@ -59,7 +60,7 @@ export async function runAgentJob(job: AgentJob): Promise<AgentJobResult> {
         return result;
 
     } catch (err) {
-        const durationMs = Date.now() - start;
+        const durationMs = 0;
         const errorMsg = err instanceof Error ? err.message : String(err);
 
         logger.error('AgentRunner', `Job failed   [${job.jobId}]: ${errorMsg}`);
@@ -67,7 +68,9 @@ export async function runAgentJob(job: AgentJob): Promise<AgentJobResult> {
         const result: AgentJobResult = {
             jobId: job.jobId,
             tenantId: job.tenantId,
+            sessionId: job.sessionId,
             response: '',
+            situation: 'introduction',
             durationMs,
             status: 'failed',
             error: errorMsg,
@@ -78,3 +81,4 @@ export async function runAgentJob(job: AgentJob): Promise<AgentJobResult> {
         throw err;
     }
 }
+
