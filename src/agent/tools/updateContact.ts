@@ -1,20 +1,7 @@
-/**
- * src/agent/tools/updateContact.ts
- *
- * "update_contact_info" tool — upserts contact info via Supabase.
- *
- * WHY UPSERT:
- * Contacts may be updated multiple times in a session. Supabase's .upsert()
- * with onConflict prevents duplicate records and keeps data clean without
- * a prior lookup. The UNIQUE(tenant_id, name) constraint in the schema
- * is the conflict target.
- */
-
 import { z } from 'zod';
 import { supabase } from '../../db/client';
 import { agentEvents } from '../../events/eventBus';
 
-// ── 1. Zod Schema ─────────────────────────────────────────────
 export const UpdateContactSchema = z.object({
     name: z.string().min(1, 'Contact name is required'),
     email: z.string().email('Must be a valid email').optional(),
@@ -26,12 +13,10 @@ export const UpdateContactSchema = z.object({
 
 export type UpdateContactInput = z.infer<typeof UpdateContactSchema>;
 
-// ── 2. Handler ────────────────────────────────────────────────
 export async function handleUpdateContact(
     tenantId: string,
     args: UpdateContactInput
 ): Promise<Record<string, unknown>> {
-    // Supabase upsert: insert or update on conflict (tenant_id, name)
     const { data, error } = await supabase
         .from('contacts')
         .upsert(
@@ -43,9 +28,8 @@ export async function handleUpdateContact(
                 updated_at: new Date().toISOString(),
             },
             {
-                // The unique constraint column(s) to detect conflicts on
                 onConflict: 'tenant_id,name',
-                ignoreDuplicates: false, // false = UPDATE on conflict (not skip)
+                ignoreDuplicates: false,
             }
         )
         .select('id')
@@ -64,7 +48,6 @@ export async function handleUpdateContact(
     };
 }
 
-// ── 3. OpenAI Function Definition ─────────────────────────────
 export const updateContactDefinition = {
     type: 'function' as const,
     function: {

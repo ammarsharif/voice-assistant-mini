@@ -1,21 +1,7 @@
-/**
- * src/agent/tools/bookTour.ts
- *
- * "book_tour" tool — writes to the `tours` table via Supabase and emits an event.
- *
- * ARCHITECTURE NOTE:
- * Each tool is a self-contained module with:
- *   1. A Zod schema (runtime validation of AI-provided args)
- *   2. A handler function (side-effect: DB write + event emit)
- *   3. An OpenAI function definition (describes the tool to the LLM)
- */
-
 import { z } from 'zod';
 import { supabase } from '../../db/client';
 import { agentEvents } from '../../events/eventBus';
 
-// ── 1. Zod Schema ─────────────────────────────────────────────
-// Validates the arguments OpenAI returns before we trust them.
 export const BookTourSchema = z.object({
     customer_name: z.string().min(1, 'Customer name is required'),
     tour_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
@@ -24,7 +10,6 @@ export const BookTourSchema = z.object({
 
 export type BookTourInput = z.infer<typeof BookTourSchema>;
 
-// ── 2. Handler ────────────────────────────────────────────────
 export async function handleBookTour(
     tenantId: string,
     args: BookTourInput
@@ -44,8 +29,6 @@ export async function handleBookTour(
 
     const tourId = (data as { id: string }).id;
 
-    // Emit async event — the listener handles downstream work (emails, CRM, etc.)
-    // This simulates how Inngest triggers background functions
     agentEvents.emit('tour:booked', { tenantId, tourId, ...args });
 
     return {
@@ -55,9 +38,6 @@ export async function handleBookTour(
     };
 }
 
-// ── 3. OpenAI Function Definition ─────────────────────────────
-// This object is passed to OpenAI so the model knows the tool exists
-// and what parameters to provide when calling it.
 export const bookTourDefinition = {
     type: 'function' as const,
     function: {
