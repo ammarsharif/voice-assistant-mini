@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { logger } from '../utils/logger';
+import { wsClientManager } from '../ws/wsClientManager';
 
 export interface ChunkEvent {
     sessionId: string;
@@ -52,6 +53,13 @@ export class MessageChannel extends EventEmitter {
             index: this.chunkIndex++,
         };
         this.emit('agent.chunk', event);
+
+        if (wsClientManager.has(this.sessionId)) {
+            wsClientManager.send(this.sessionId, {
+                type: 'token',
+                payload: { sessionId: this.sessionId, text: chunk, index: event.index },
+            });
+        }
     }
 
     emitComplete(durationMs: number): void {
@@ -69,12 +77,26 @@ export class MessageChannel extends EventEmitter {
         const event: ToolStartEvent = { sessionId: this.sessionId, toolName };
         logger.event('Channel', `Tool start — session=${this.sessionId} | tool=${toolName}`);
         this.emit('agent.tool.start', event);
+
+        if (wsClientManager.has(this.sessionId)) {
+            wsClientManager.send(this.sessionId, {
+                type: 'tool_call',
+                payload: { sessionId: this.sessionId, name: toolName },
+            });
+        }
     }
 
     emitToolDone(toolName: string, result: Record<string, unknown>): void {
         const event: ToolDoneEvent = { sessionId: this.sessionId, toolName, result };
         logger.event('Channel', `Tool done  — session=${this.sessionId} | tool=${toolName}`);
         this.emit('agent.tool.done', event);
+
+        if (wsClientManager.has(this.sessionId)) {
+            wsClientManager.send(this.sessionId, {
+                type: 'tool_result',
+                payload: { sessionId: this.sessionId, name: toolName, result },
+            });
+        }
     }
 
     emitInterrupt(reason: string): void {
@@ -88,6 +110,13 @@ export class MessageChannel extends EventEmitter {
         const event: ErrorEvent = { sessionId: this.sessionId, error };
         logger.error('Channel', `Error      — session=${this.sessionId} | ${error}`);
         this.emit('agent.error', event);
+
+        if (wsClientManager.has(this.sessionId)) {
+            wsClientManager.send(this.sessionId, {
+                type: 'error',
+                payload: { sessionId: this.sessionId, message: error },
+            });
+        }
     }
 
     get currentBuffer(): string {

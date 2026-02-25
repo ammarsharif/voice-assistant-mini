@@ -4,6 +4,7 @@ import { redisClient } from './config/redis';
 import { registerListeners } from './events/listeners';
 import { registerColdPathListeners } from './events/coldPathListeners';
 import { createApp } from './app';
+import { attachWsServer } from './ws/wsServer';
 import { registerShutdownHandlers } from './utils/gracefulShutdown';
 import { drainWorker } from './worker/worker';
 import { agentEvents } from './events/eventBus';
@@ -19,11 +20,17 @@ const server = app.listen(env.PORT, () => {
     logger.info('Server', `Environment : ${env.NODE_ENV}`);
 });
 
+const wss = attachWsServer(server);
+
 registerShutdownHandlers({
     httpServer: server,
     redis: redisClient,
     emitters: [agentEvents],
     cleanupFns: [
         async () => { await drainWorker(); },
+        async () => {
+            await new Promise<void>((resolve) => wss.close(() => resolve()));
+            logger.success('Server', 'WebSocket server closed');
+        },
     ],
 });
