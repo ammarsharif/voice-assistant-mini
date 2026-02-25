@@ -8,6 +8,13 @@ import {
     JobStartedEvent,
     JobCompletedEvent,
     JobFailedEvent,
+    AgentChunkEvent,
+    AgentCompleteEvent,
+    AgentToolStartEvent,
+    AgentToolDoneEvent,
+    AgentInterruptedEvent,
+    AgentToolUsedEvent,
+    AgentInterruptedGlobalEvent,
 } from './eventBus';
 
 async function simulateAsync(label: string, delayMs = 80): Promise<void> {
@@ -80,8 +87,68 @@ function registerLifecycleListeners(): void {
     });
 }
 
+function registerStreamingListeners(): void {
+    agentEvents.on('agent.chunk', (event: AgentChunkEvent) => {
+        if (event.index % 10 === 0) {
+            logger.debug(
+                'agent.chunk',
+                `session=${event.sessionId} | #${event.index} | "${event.chunk}"`
+            );
+        }
+    });
+
+    agentEvents.on('agent.complete', (event: AgentCompleteEvent) => {
+        logger.success(
+            'agent.complete',
+            `session=${event.sessionId} | ${event.durationMs}ms | ` +
+            `${event.fullText.length} chars`
+        );
+    });
+
+    agentEvents.on('agent.tool.start', (event: AgentToolStartEvent) => {
+        logger.event(
+            'agent.tool.start',
+            `session=${event.sessionId} | tool=${event.toolName} — stream paused`
+        );
+    });
+
+    agentEvents.on('agent.tool.done', (event: AgentToolDoneEvent) => {
+        logger.event(
+            'agent.tool.done',
+            `session=${event.sessionId} | tool=${event.toolName} — stream resuming`
+        );
+    });
+
+    agentEvents.on('agent.interrupted', (event: AgentInterruptedEvent) => {
+        logger.warn(
+            'agent.interrupted',
+            `session=${event.sessionId} | reason=${event.reason}`
+        );
+        logger.info(
+            'agent.interrupted',
+            `[SIM] TTS playback cancelled — voice channel would go silent now`
+        );
+    });
+
+    agentEvents.on('agent:tool:used', (event: AgentToolUsedEvent) => {
+        logger.event(
+            'agent:tool:used',
+            `session=${event.sessionId} | tenant=${event.tenantId} | ` +
+            `tool=${event.toolName} | ${event.durationMs}ms`
+        );
+    });
+
+    agentEvents.on('agent:interrupted', (event: AgentInterruptedGlobalEvent) => {
+        logger.warn(
+            'agent:interrupted',
+            `[VAD-SIM] Barge-in detected — session=${event.sessionId} | reason=${event.reason}`
+        );
+    });
+}
+
 export function registerListeners(): void {
     registerDomainListeners();
     registerLifecycleListeners();
-    logger.success('Listeners', 'All event listeners registered');
+    registerStreamingListeners();
+    logger.success('Listeners', 'All event listeners registered (v4 — streaming mode)');
 }

@@ -4,6 +4,8 @@ import { runAgentJob, AgentJob, AgentJobResult } from './agentRunner';
 import { checkRateLimit } from '../services/promptService';
 import { logger } from '../utils/logger';
 
+export type { AgentJob, AgentJobResult };
+
 const MAX_CONCURRENT_JOBS = 5;
 let activeJobs = 0;
 

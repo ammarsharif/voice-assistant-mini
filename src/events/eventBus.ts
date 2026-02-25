@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 
 export const agentEvents = new EventEmitter();
-agentEvents.setMaxListeners(30);
+agentEvents.setMaxListeners(50);
 
 export interface TourBookedEvent {
     tenantId: string;
@@ -80,4 +80,50 @@ export interface MessageProcessedEvent {
     situation: string;
     toolUsed?: string;
     durationMs: number;
+    interrupted?: boolean;
+}
+
+export interface AgentChunkEvent {
+    sessionId: string;
+    chunk: string;
+    index: number;
+}
+
+export interface AgentCompleteEvent {
+    sessionId: string;
+    fullText: string;
+    durationMs: number;
+}
+
+export interface AgentToolStartEvent {
+    sessionId: string;
+    toolName: string;
+}
+
+export interface AgentToolDoneEvent {
+    sessionId: string;
+    toolName: string;
+    result: Record<string, unknown>;
+}
+
+export interface AgentInterruptedEvent {
+    sessionId: string;
+    reason: string;
+}
+
+export interface AgentErrorEvent {
+    sessionId: string;
+    error: string;
+}
+
+export interface AgentToolUsedEvent {
+    sessionId: string;
+    tenantId: string;
+    toolName: string;
+    durationMs: number;
+}
+
+export interface AgentInterruptedGlobalEvent {
+    sessionId: string;
+    reason: string;
 }
