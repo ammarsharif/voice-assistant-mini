@@ -121,3 +121,4 @@ dump.rdb
 .stylelintcache
 *.bak
 *.orig
+.vercel

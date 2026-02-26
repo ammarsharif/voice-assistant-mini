@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice AI Agent Console</title>
+    <!-- Include LiveKit JS Client SDK from unpkg -->
+    <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.js"></script>
+    <style>
+        :root {
+            --bg: #1e1e1e;
+            --surface: #2d2d2d;
+            --primary: #4F46E5;
+            --text: #f3f4f6;
+            --text-muted: #9ca3af;
+            --danger: #ef4444;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            background-color: var(--surface);
+            padding: 2.5rem;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            margin-bottom: 2rem;
+            font-weight: 600;
+        }
+
+        #statusText {
+            margin-bottom: 2rem;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .btn {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.2s;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn-danger {
+            background-color: var(--danger);
+            display: none;
+        }
+
+        /* Pulse wave animation for when active */
+        .pulse-ring {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: rgba(79, 70, 229, 0.2);
+            margin: 0 auto 2rem auto;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .pulse-ring.active {
+            animation: pulse-animation 2s infinite;
+            background: rgba(79, 70, 229, 0.4);
+        }
+
+        .mic-icon {
+            width: 32px;
+            height: 32px;
+            fill: var(--text);
+        }
+
+        @keyframes pulse-animation {
+            0% { box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.6); }
+            70% { box-shadow: 0 0 0 20px rgba(79, 70, 229, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(79, 70, 229, 0); }
+        }
+
+        /* A container to attach invisible audio elements */
+        #audioContainer {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <!-- Visualizer Circle -->
+        <div class="pulse-ring" id="pulseRing">
+            <svg class="mic-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+            </svg>
+        </div>
+
+        <h1>Voice AI Agent</h1>
+        <p id="statusText">Ready to connect.</p>
+
+        <button class="btn" id="connectBtn">Connect to AI Agent</button>
+        <button class="btn btn-danger" id="disconnectBtn">Disconnect</button>
+    </div>
+
+    <!-- LiveKit tracks attach here -->
+    <div id="audioContainer"></div>
+
+    <script>
+        // Use your real tenant ID here
+        const TENANT_ID = '00000000-0000-0000-0000-000000000001'; 
+        
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const statusText = document.getElementById('statusText');
+        const pulseRing = document.getElementById('pulseRing');
+        const audioContainer = document.getElementById('audioContainer');
+
+        let currentRoom = null;
+        let currentSessionId = null;
+
+        connectBtn.addEventListener('click', startCall);
+        disconnectBtn.addEventListener('click', endCall);
+
+        async function startCall() {
+            setUIState('connecting');
+
+            try {
+                // 1. Ask backend for a LiveKit Token + Agent session
+                statusText.innerText = "Requesting agent session...";
+                const randomRoom = 'room-' + Math.random().toString(36).substring(7);
+                const joinRes = await fetch('/live/join', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        tenantId: TENANT_ID,
+                        participantName: 'Web User',
+                        roomName: randomRoom
+                    })
+                });
+
+                if (!joinRes.ok) throw new Error("Failed to get session from backend");
+                
+                const { token, livekitHost, sessionId } = await joinRes.json();
+                currentSessionId = sessionId;
+
+                // 2. Initialise LiveKit Room
+                statusText.innerText = "Connecting to LiveKit room...";
+                const room = new LivekitClient.Room({
+                    adaptiveStream: true,
+                    dynacast: true,
+                    videoCaptureDefaults: false
+                });
+                
+                currentRoom = room;
+
+                // 3. Listen for agent audio tracks arriving
+                room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
+                    console.log("Track subscribed from:", participant.identity);
+                    if (track.kind === LivekitClient.Track.Kind.Audio) {
+                        // Attach the audio track cleanly to the DOM so you can hear it!
+                        const audioElement = track.attach();
+                        audioContainer.appendChild(audioElement);
+                    }
+                });
+
+                // 4. Connect to the LiveKit server!
+                await room.connect(livekitHost, token);
+
+                // 5. Publish microphone
+                statusText.innerText = "Publishing microphone...";
+                const localAudio = await LivekitClient.createLocalAudioTrack();
+                await room.localParticipant.publishTrack(localAudio);
+
+                setUIState('connected');
+                
+            } catch (err) {
+                console.error("Start Call Error:", err);
+                statusText.innerText = "Connection failed: " + err.message;
+                setUIState('disconnected');
+            }
+        }
+
+        async function endCall() {
+            if (currentRoom) {
+                currentRoom.disconnect();
+                currentRoom = null;
+            }
+
+            // Tell the backend to kill the agent process
+            if (currentSessionId) {
+                await fetch('/live/leave', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId: currentSessionId })
+                });
+                currentSessionId = null;
+            }
+
+            // Clean DOM
+            audioContainer.innerHTML = '';
+            setUIState('disconnected');
+        }
+
+        function setUIState(state) {
+            if (state === 'disconnected') {
+                connectBtn.style.display = 'flex';
+                disconnectBtn.style.display = 'none';
+                pulseRing.classList.remove('active');
+                if (!statusText.innerText.includes('failed')) {
+                    statusText.innerText = "Ready to connect.";
+                }
+            } else if (state === 'connecting') {
+                connectBtn.style.display = 'none';
+                disconnectBtn.style.display = 'none';
+                statusText.innerText = "Connecting...";
+            } else if (state === 'connected') {
+                connectBtn.style.display = 'none';
+                disconnectBtn.style.display = 'flex';
+                pulseRing.classList.add('active');
+                statusText.innerText = "Live call active! Speak into your microphone.";
+            }
+        }
+    </script>
+</body>
+</html>
