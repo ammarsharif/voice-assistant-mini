@@ -17,12 +17,6 @@ out/
 # ========================
 # Environment Variables
 # ========================
-.env
-.env.local
-.env.development
-.env.production
-.env.staging
-.env.test
 # Keep .env.example committed
 !.env.example
 
@@ -81,9 +75,6 @@ desktop.ini
 # ========================
 # Editor & IDE
 # ========================
-.vscode/
-!.vscode/extensions.json
-!.vscode/settings.json
 .idea/
 *.suo
 *.ntvs*
@@ -122,3 +113,8 @@ dump.rdb
 *.bak
 *.orig
 .vercel
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore
+config.bat
+branch_structure.json
